@@ -1,5 +1,7 @@
 # coding = gbk
 from collections import namedtuple
+import Queue
+import threading
 import itertools
 import logging
 import functools
@@ -49,6 +51,7 @@ class Node(object):
         self.roles.remove(role)
 
     def receive(self, sender, message):
+        '''一个很重要的函数, 为什么用namedtuple, 接受信息后怎么应该怎么做'''
         handler_name="do_%s"%type(message).__name__
         for comp in self.roles[:]:
             if not hasattr(comp, handler_name):
@@ -169,9 +172,79 @@ class Replica(Role):
             self.logger.debug("leader timed out; tring the next one, %s", self.latest_leader)
         self.latest_leader_timeout=self.set_timer(LEADER_TIMEOUT, reset_leader())
 
-    def do_join(self, sender):
+    def do_Join(self, sender):
         if sender in self.peers:
             self.node.send([sender], Welcome(state=self.state, slot=self.slot, decisions=self.decisions))
+
+class Commander(Role):
+    def __init__(self, node, ballot_num, slot, proposal, peers):
+        super(Commander, self).__init__(node)
+        self.ballot_num=ballot_num
+        self.slot=slot
+        self.proposal=proposal
+        self.acceptors=set([])
+        self.peers=peers
+        self.quorum=len(peers)+1
+
+    def start(self):
+        self.node.send(set(self.peers)-self.acceptors, Accept(slot=self.slot, ballot_num=self.ballot_num, proposal=self.proposal))
+        self.set_timer(ACCEPT_RETRANSMIT, self.start)
+
+    def finished(self, ballot_num, preempted):
+        if preempted:
+            self.node.send([self.node.address], Preempted(slot=self.slot, preempted_by=ballot_num))
+        else:
+            self.node.send([self.node.address], Decided(slot=self.slot))
+        self.stop()
+
+    def do_Accepted(self, sender, slot, ballot_num):
+        if self.slot!=slot:
+            return
+        if ballot_num==self.ballot_num:
+            self.acceptors.add(sender)
+            if len(self.acceptors)<self.quorum:
+                return
+            self.node.send(self.peers, Decision(slot=self.slot, proposal=self.proposal))
+            self.finished(ballot_num, False)
+        else:
+            self.finished(ballot_num, True)
+
+class Scout(Role):
+    def __init__(self, node, ballot_num, peers):
+        super(Scout, self).__init__(node)
+        self.ballot_num=ballot_num
+        self.accepted_proposals={}
+        self.acceptors=set([])
+        self.peers=peers
+        self.quorum=len(peers)+1
+        self.retransmit_timer=None
+
+    def start(self):
+        self.logger.info("scout starting")
+        self.send_prepare()
+
+    def send_prepare(self):
+        self.node.send(self.peers, Prepare(ballot_num=self.ballot_num))
+        self.retransmit_timer=self.set_timer(PREPARE_RETRANSMIT, self.send_prepare)
+
+    def update_accepted(self, accepted_proposals):
+        acc=self.accepted_proposals
+        for slot, (ballot_num, proposal) in acc.iteritems():        #一次投票可能有好几个proposal 所以这要遍历一个集合
+            if slot not in acc or acc[slot][0]<ballot_num:
+                acc[slot]=(ballot_num, proposal)
+
+    def do_Promise(self, sender, ballot_num, accepted_proposals):
+        if ballot_num==self.ballot_num:
+            self.logger.info("got matching promise: need %d" % self.quorum)
+            self.update_accepted(accepted_proposals)
+            self.acceptors.add(sender)
+            if len(self.acceptors)>=self.quorum:
+                accepted_proposals=dict((s,p) for s, (b,p) in self.accepted_proposals.iteritems())
+                self.node.send([self.node.address], Adopted(ballot_num=ballot_num, accepted_proposals=accepted_proposals))
+                self.stop()
+        else:
+            self.node.send([self.node.address],Preempted(slot=None, preempted_by=ballot_num))
+            self.stop()
 
 class Leader(Role):
     def __init__(self, node, peers, commander_cls=Commander, scout_cls=Scout):
@@ -228,73 +301,80 @@ class Leader(Role):
         else:
             self.logger.info("got PROPOSE for a slot already being proposed")
 
-class Scout(Role):
-    def __init__(self, node, ballot_num, peers):
-        super(Scout, self).__init__(node)
-        self.ballot_num=ballot_num
-        self.accepted_proposals={}
-        self.acceptors=set([])
+class Bootstrap(Role):
+    def __init__(self, node, peers, execute_fn, replica_cls=Replica,
+                 acceptor_cls=Accept, commander_cls=Commander, scout_cls=Scout):
+        super(Bootstrap, self).__init__(node)
+        self.execute_fn=execute_fn
         self.peers=peers
-        self.quorum=len(peers)+1
-        self.retransmit_timer=None
+        self.peers_cycle=itertools.cycle(peers)
+        self.replica_cls=replica_cls
+        self.acceptor_cls=acceptor_cls
+        self.commander_cls=commander_cls
+        self.scout_cls=scout_cls
 
     def start(self):
-        self.logger.info("scout starting")
-        self.send_prepare()
+        self.join()
 
-    def send_prepare(self):
-        self.node.send(self.peers, Prepare(ballot_num=self.ballot_num))
-        self.retransmit_timer=self.set_timer(PREPARE_RETRANSMIT, self.send_prepare)
+    def join(self):
+        self.node.send([next(self.peers_cycle)], Join())
+        self.set_timer(JOIN_RETRANSMIT, self.join)
 
-    def update_accepted(self, accepted_proposals):
-        acc=self.accepted_proposals
-        for slot, (ballot_num, proposal) in acc.iteritems():        #一次投票可能有好几个proposal 所以这要遍历一个集合
-            if slot not in acc or acc[slot][0]<ballot_num:
-                acc[slot]=(ballot_num, proposal)
-
-    def do_Promise(self, sender, ballot_num, accepted_proposals):
-        if ballot_num==self.ballot_num:
-            self.logger.info("got matching promise: need %d" % self.quorum)
-            self.update_accepted(accepted_proposals)
-            self.acceptors.add(sender)
-            if len(self.acceptors)>=self.quorum:
-                accepted_proposals=dict((s,p) for s, (b,p) in self.accepted_proposals.iteritems())
-                self.node.send([self.node.address], Adopted(ballot_num=ballot_num, accepted_proposals=accepted_proposals))
-                self.stop()
-        else:
-            self.node.send([self.node.address],Preempted(slot=None, preempted_by=ballot_num))
-            self.stop()
-
-class Commander(Role):
-    def __init__(self, node, ballot_num, slot, proposal, peers):
-        super(Commander, self).__init__(node)
-        self.ballot_num=ballot_num
-        self.slot=slot
-        self.proposal=proposal
-        self.acceptors=set([])
-        self.peers=peers
-        self.quorum=len(peers)+1
-
-    def start(self):
-        self.node.send(set(self.peers)-self.acceptors, Accept(slot=self.slot, ballot_num=self.ballot_num, proposal=self.proposal))
-        self.set_timer(ACCEPT_RETRANSMIT, self.start)
-
-    def finished(self, ballot_num, preempted):
-        if preempted:
-            self.node.send([self.node.address], Preempted(slot=self.slot, preempted_by=ballot_num))
-        else:
-            self.node.send([self.node.address], Decided(slot=self.slot))
+    def do_Welcome(self, sender, state, slot, decisions):
+        self.acceptor_cls(self.node)
+        self.replica_cls(self.node, execute_fn=self.execute_fn,
+                         peers=self.peers, state=state, slot=slot, decisions=decisions)
+        self.leader_cls(self.node, peers=self.peers, commander_cls=self.commander_cls,
+                        scout_cls=self.scout_cls).start()
         self.stop()
 
-    def do_Accepted(self, sender, slot, ballot_num):
-        if self.slot!=slot:
-            return
-        if ballot_num==self.ballot_num:
-            self.acceptors.add(sender)
-            if len(self.acceptors)<self.quorum:
-                return
-            self.node.send(self.peers, Decision(slot=self.slot, proposal=self.proposal))
-            self.finished(ballot_num, False)
-        else:
-            self.finished(ballot_num, True)
+class Seed(Role):
+    def __init__(self, node, initial_state, execute_fn, peers,
+                 bootstrap_cls=Bootstrap):
+        super(Seed, self).__init__(node)
+        self.execute_fn=execute_fn
+        self.peers=peers
+        self.bootstrap_cls=bootstrap_cls
+        self.seen_peers=set([])
+        self.exit_timer=None
+        self.initial_state=initial_state
 
+    def do_Join(self, sender):
+        self.seen_peers.add(sender)
+        if len(self.seen_peers)<=len(self.peers)/2:
+            return
+        self.node.send(list(self.seen_peers), Welcome(state=self.initial_state, slot=1, decisions={}))
+        if self.exit_timer:
+            self.exit_timer.cancel()
+        self.exit_timer=self.set_timer(JOIN_RETRANSMIT*2, self.finish)
+
+    def finish(self):
+        bs=self.bootstrap_cls(self.node, peers=self.peers, execute_fn=self.execute_fn)
+        bs.start()
+        self.stop()
+
+class Member(object):
+    '''应用程序接口, '''
+    def __init__(self, state_machine, network, peers,
+                 seed=None, seed_cls=Seed, bootstrap_cls=Bootstrap):
+        self.network=network
+        self.node=network.new_node()
+        if seed is not None:
+            self.startup_role=seed_cls(self.node, initial_state=seed, peers=peers, execute_fn=state_machine)
+        else:
+            self.startup_role=bootstrap_cls(self.node, execute_fn=state_machine, peers=peers)
+        self.requester=None
+
+    def start(self):
+        self.startup_role.start()
+        self.thread=threading.Thread(target=self.network.run)
+        self.thread.start()
+
+    def invoke(self, input_value, request_cls=Requester):
+        assert self.requester is None
+        q=Queue.Queue()
+        self.requester=request_cls(self.node, input_value, q.put)
+        self.requester.start()
+        output=q.get()
+        self.requester=None
+        return output

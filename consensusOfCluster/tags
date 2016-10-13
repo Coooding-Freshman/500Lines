@@ -12,7 +12,9 @@ Accepting	Consensus.py	/^Accepting = namedtuple('Accepting', ['leader'])$/;"	v
 Active	Consensus.py	/^Active = namedtuple('Active', [])$/;"	v
 Adopted	Consensus.py	/^Adopted = namedtuple('Adopted', ['ballot_num', 'accepted_proposals'])$/;"	v
 Ballot	Consensus.py	/^Ballot = namedtuple('Ballot', ['n', 'leader'])$/;"	v
+Bootstrap	Consensus.py	/^class Bootstrap(Role):$/;"	c
 CATCHUP_INTERVAL	Consensus.py	/^CATCHUP_INTERVAL = 0.6$/;"	v
+Commander	Consensus.py	/^class Commander(Role):$/;"	c
 Decided	Consensus.py	/^Decided = namedtuple('Decided', ['slot'])$/;"	v
 Decision	Consensus.py	/^Decision = namedtuple('Decision', ['slot', 'proposal'])$/;"	v
 INVOKE_RETRANSMIT	Consensus.py	/^INVOKE_RETRANSMIT = 0.5$/;"	v
@@ -22,6 +24,7 @@ JOIN_RETRANSMIT	Consensus.py	/^JOIN_RETRANSMIT = 0.7$/;"	v
 Join	Consensus.py	/^Join = namedtuple('Join', [])$/;"	v
 LEADER_TIMEOUT	Consensus.py	/^LEADER_TIMEOUT = 1.0$/;"	v
 Leader	Consensus.py	/^class Leader(Role):$/;"	c
+Member	Consensus.py	/^class Member(object):$/;"	c
 NOOP_PROPOSAL	Consensus.py	/^NOOP_PROPOSAL = Proposal(None, None, None)  # no-op to fill otherwise empty slots$/;"	v
 NULL_BALLOT	Consensus.py	/^NULL_BALLOT = Ballot(-1, -1)  # sorts before all real ballots$/;"	v
 Node	Consensus.py	/^class Node(object):$/;"	c
@@ -33,33 +36,55 @@ Proposal	Consensus.py	/^Proposal = namedtuple('Proposal', ['caller', 'client_id'
 Propose	Consensus.py	/^Propose = namedtuple('Propose', ['slot', 'proposal'])$/;"	v
 Replica	Consensus.py	/^class Replica(Role):$/;"	c
 Role	Consensus.py	/^class Role(object):$/;"	c
+Scout	Consensus.py	/^class Scout(Role):$/;"	c
+Seed	Consensus.py	/^class Seed(Role):$/;"	c
 Welcome	Consensus.py	/^Welcome = namedtuple('Welcome', ['state', 'slot', 'decisions'])$/;"	v
 __init	Consensus.py	/^    def __init(self, network, address):$/;"	m	class:Node	file:
 __init__	Consensus.py	/^    def __init__(self, node):$/;"	m	class:Accepter
 __init__	Consensus.py	/^    def __init__(self, node):$/;"	m	class:Role
+__init__	Consensus.py	/^    def __init__(self, node, ballot_num, peers):$/;"	m	class:Scout
+__init__	Consensus.py	/^    def __init__(self, node, ballot_num, slot, proposal, peers):$/;"	m	class:Commander
 __init__	Consensus.py	/^    def __init__(self, node, execute_fn, state, slot, decisions, peers):$/;"	m	class:Replica
+__init__	Consensus.py	/^    def __init__(self, node, initial_state, execute_fn, peers,$/;"	m	class:Seed
 __init__	Consensus.py	/^    def __init__(self, node, peers, commander_cls=Commander, scout_cls=Scout):$/;"	m	class:Leader
+__init__	Consensus.py	/^    def __init__(self, node, peers, execute_fn, replica_cls=Replica,$/;"	m	class:Bootstrap
+__init__	Consensus.py	/^    def __init__(self, state_machine, network, peers,$/;"	m	class:Member
+active	Consensus.py	/^        def active():$/;"	f	function:Leader.start
 commit	Consensus.py	/^    def  commit(self, slot, proposal):$/;"	m	class:Replica
 do_Accept	Consensus.py	/^    def do_Accept(self, sender, ballot_num, slot, proposal):$/;"	m	class:Accepter
+do_Accepted	Consensus.py	/^    def do_Accepted(self, sender, slot, ballot_num):$/;"	m	class:Commander
 do_Acceptint	Consensus.py	/^    def do_Acceptint(self, sender, leader):$/;"	m	class:Replica
 do_Active	Consensus.py	/^    def do_Active(self, sender):$/;"	m	class:Replica
 do_Adoptd	Consensus.py	/^    def do_Adoptd(self, sender, ballot_num, accepted_proposals):$/;"	m	class:Leader
 do_Adopted	Consensus.py	/^    def do_Adopted(self, sender, ballot_num, accepted_proposals):$/;"	m	class:Replica
 do_Decision	Consensus.py	/^    def do_Decision(self, sender, slot, proposal):$/;"	m	class:Replica
 do_Inovke	Consensus.py	/^    def do_Inovke(self, sender, caller, client_id, input_value):$/;"	m	class:Replica
+do_Join	Consensus.py	/^    def do_Join(self, sender):$/;"	m	class:Replica
+do_Join	Consensus.py	/^    def do_Join(self, sender):$/;"	m	class:Seed
 do_Preempted	Consensus.py	/^    def do_Preempted(self, sender, slot, preempted_by):$/;"	m	class:Leader
 do_Prepare	Consensus.py	/^    def do_Prepare(self, sender, ballot_num):$/;"	m	class:Accepter
+do_Promise	Consensus.py	/^    def do_Promise(self, sender, ballot_num, accepted_proposals):$/;"	m	class:Scout
 do_Propose	Consensus.py	/^    def do_Propose(self, sender, slot, proposal):$/;"	m	class:Leader
-do_join	Consensus.py	/^    def do_join(self, sender):$/;"	m	class:Replica
+do_Welcome	Consensus.py	/^    def do_Welcome(self, sender, state, slot, decisions):$/;"	m	class:Bootstrap
+finish	Consensus.py	/^    def finish(self):$/;"	m	class:Seed
+finished	Consensus.py	/^    def finished(self, ballot_num, preempted):$/;"	m	class:Commander
+invoke	Consensus.py	/^    def invoke(self, input_value, request_cls=Requester):$/;"	m	class:Member
+join	Consensus.py	/^    def join(self):$/;"	m	class:Bootstrap
 leader_alive	Consensus.py	/^    def leader_alive(self):$/;"	m	class:Replica
 propose	Consensus.py	/^    def propose(self, proposal, slot=None):$/;"	m	class:Replica
 receive	Consensus.py	/^    def receive(self, sender, message):$/;"	m	class:Node
 register	Consensus.py	/^    def register(self, role):$/;"	m	class:Node
 reset_leader	Consensus.py	/^        def reset_leader():$/;"	f	function:Replica.leader_alive
+send_prepare	Consensus.py	/^    def send_prepare(self):$/;"	m	class:Scout
 set_timer	Consensus.py	/^    def set_timer(self, second, callbcak):$/;"	m	class:Role
 spawn_commander	Consensus.py	/^    def spawn_commander(self, ballot_num, slot):$/;"	m	class:Leader
 spawn_scout	Consensus.py	/^    def spawn_scout(self):$/;"	m	class:Leader
+start	Consensus.py	/^    def start(self):$/;"	m	class:Bootstrap
+start	Consensus.py	/^    def start(self):$/;"	m	class:Commander
 start	Consensus.py	/^    def start(self):$/;"	m	class:Leader
+start	Consensus.py	/^    def start(self):$/;"	m	class:Member
+start	Consensus.py	/^    def start(self):$/;"	m	class:Scout
 stop	Consensus.py	/^    def stop(self):$/;"	m	class:Role
-unique_id	Consensus.py	/^    unique_id=itertools.count()$/;"	v	class:Node
+unique_ids	Consensus.py	/^    unique_ids=itertools.count()$/;"	v	class:Node
 unregister	Consensus.py	/^    def unregister(self, role):$/;"	m	class:Node
+update_accepted	Consensus.py	/^    def update_accepted(self, accepted_proposals):$/;"	m	class:Scout
