@@ -1,5 +1,7 @@
 # coding = gbk
 from collections import namedtuple
+import random
+import heapq
 import Queue
 import threading
 import itertools
@@ -35,6 +37,7 @@ NULL_BALLOT = Ballot(-1, -1)  # sorts before all real ballots
 NOOP_PROPOSAL = Proposal(None, None, None)  # no-op to fill otherwise empty slots
 
 class Node(object):
+    '''将cluster里面的所有role聚合在一起的一个类'''
     unique_ids=itertools.count()
     def __init(self, network, address):
         self.network=network
@@ -353,6 +356,28 @@ class Seed(Role):
         bs.start()
         self.stop()
 
+class Requester(Role):
+    client_ids=itertools.count(start=100000)
+    def __init__(self, node, n, callback):
+        super(Requester, self).__init__(node)
+        self.client_id=self.client_ids.next()
+        self.n=n
+        self.output=None
+        self.callback=callback()
+
+    def start(self):
+        self.node.send([self.node.address], Invoke(caller=self.node.address,
+                                        client_id=self.client_id,input_value=self.n))
+        self.invoke_timer=self.set_timer(INVOKE_RETRANSMIT, self.start)
+
+    def do_Invoked(self, sender, client_id, output):
+        if client_id!=self.client_id:
+            return
+        self.logger.debug("received output %r" % (output,))
+        self.invoke_timer.cancel()
+        self.callback(output)
+        self.stop()
+
 class Member(object):
     '''应用程序接口, '''
     def __init__(self, state_machine, network, peers,
@@ -371,6 +396,7 @@ class Member(object):
         self.thread.start()
 
     def invoke(self, input_value, request_cls=Requester):
+        "产生了一个Replica object 并且返回一个Replica object"
         assert self.requester is None
         q=Queue.Queue()
         self.requester=request_cls(self.node, input_value, q.put)
@@ -378,3 +404,48 @@ class Member(object):
         output=q.get()
         self.requester=None
         return output
+
+class Timer(object):
+    def __init__(self, expires, address, callback):
+        self.expires=expires
+        self.address=address
+        self.callback=callback
+        self.cancelled=False
+
+    def __cmp__(self, other):
+        return cmp(self.expires, other.expires)
+
+    def cancel(self):
+        self.cancelled=True
+
+class Network(object):
+    PROP_DELAY=0.03
+    PROP_JITTER=0.02
+    DROP_PROB=0.05
+
+    def __init__(self, seed):
+        self.nodes={}
+        self.rnd=random.Random(seed)
+        self.timers=[]
+        self.now=1000.0
+
+    def new_node(self, address=None):
+        node=Node(self, address=address)
+        self.nodes[node.address]=node
+        return node
+
+    def run(self):
+        while self.timers:
+            next_timer=self.timers[0]
+            if next_timer.expires>self.now:
+                self.now=next_timer.expires
+            heapq.heappop(self.timers)
+            if next_timer.cancelled:
+                continue
+            if not next_timer.address or next_timer.address in self.nodes:
+                next_timer.callback()
+
+    def stop(self):
+        self.timers=[]
+
+
