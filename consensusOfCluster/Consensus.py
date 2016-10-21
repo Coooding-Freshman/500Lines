@@ -36,6 +36,14 @@ LEADER_TIMEOUT = 1.0
 NULL_BALLOT = Ballot(-1, -1)  # sorts before all real ballots
 NOOP_PROPOSAL = Proposal(None, None, None)  # no-op to fill otherwise empty slots
 
+class SimTimeLogger(logging.LoggerAdapter):
+    def process(self, msg, kwargs):
+        return "T=%.3f %s" % (self.extra['network'].now, msg), kwargs
+
+    def getChild(self, name):
+        return self.__class__(self.logger.getChild(name), {'network':
+                                                    self.extra['network']})
+
 class Node(object):
     '''将cluster里面的所有role聚合在一起的一个类'''
     unique_ids=itertools.count()
@@ -64,6 +72,7 @@ class Node(object):
             fn(sender=sender, **message._asdict())
 
 class Role(object):
+    '''所有角色的基类'''
     def __init__(self, node):
         self.node=node
         self.node.register(self)
@@ -84,6 +93,8 @@ class Accepter(Role):
         self.accepted_proposals={}
 
     def do_Prepare(self, sender, ballot_num):
+        '''如果大于自己的选举编号投赞成票, 两次发送一个是给leader的, 一个
+        给replica 的'''
         if ballot_num>self.ballot_num:
             self.ballot_num=ballot_num
             self.node.send([self.node.address], Accepting(leader=sender))
