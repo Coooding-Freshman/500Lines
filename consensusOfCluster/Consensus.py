@@ -1,5 +1,6 @@
-# coding = gbk
+#-*- coding:UTF-8 -*-
 from collections import namedtuple
+import copy
 import random
 import heapq
 import Queue
@@ -47,7 +48,7 @@ class SimTimeLogger(logging.LoggerAdapter):
 class Node(object):
     '''将cluster里面的所有role聚合在一起的一个类'''
     unique_ids=itertools.count()
-    def __init(self, network, address):
+    def __init__(self, network, address):
         self.network=network
         self.address=address or 'N%d' % self.unique_ids.next()
         self.logger=SimTimeLogger(logging.getLogger(self.address), {'network': self.network})
@@ -316,10 +317,10 @@ class Leader(Role):
             self.logger.info("got PROPOSE for a slot already being proposed")
 
 class Bootstrap(Role):
-    def __init__(self, node, peers, execute_fn, replica_cls=Replica,
+    def __init__(self, node, peers, execute_fun, replica_cls=Replica,
                  acceptor_cls=Accept, commander_cls=Commander, scout_cls=Scout):
         super(Bootstrap, self).__init__(node)
-        self.execute_fn=execute_fn
+        self.execute_fun=execute_fun
         self.peers=peers
         self.peers_cycle=itertools.cycle(peers)
         self.replica_cls=replica_cls
@@ -336,7 +337,7 @@ class Bootstrap(Role):
 
     def do_Welcome(self, sender, state, slot, decisions):
         self.acceptor_cls(self.node)
-        self.replica_cls(self.node, execute_fn=self.execute_fn,
+        self.replica_cls(self.node, execute_fun=self.execute_fun,
                          peers=self.peers, state=state, slot=slot, decisions=decisions)
         self.leader_cls(self.node, peers=self.peers, commander_cls=self.commander_cls,
                         scout_cls=self.scout_cls).start()
@@ -374,7 +375,7 @@ class Requester(Role):
         self.client_id=self.client_ids.next()
         self.n=n
         self.output=None
-        self.callback=callback()
+        self.callback=callback
 
     def start(self):
         self.node.send([self.node.address], Invoke(caller=self.node.address,
@@ -458,5 +459,22 @@ class Network(object):
 
     def stop(self):
         self.timers=[]
+
+    def set_timer(self, address, seconds, callback):
+        timer=Timer(self.now+seconds, address, callback)
+        heapq.heappush(self.timers, timer)
+        return timer
+
+    def send(self, sender, destinations, message):
+        sender.logger.debug("sending %s to %s", message, destinations)
+        def sendto(dest, message):
+            if dest == sender.address:
+                self.set_timer(sender.address, 0, lambda: sender.receive(sender.address, message))
+            elif self.rnd.uniform(0, 1.0) > self.DROP_PROB:
+                delay = self.PROP_DELAY + self.rnd.uniform(-self.PROP_JITTER, self.PROP_JITTER)
+                self.set_timer(dest, delay, functools.partial(self.nodes[dest].receive,
+                                                              sender.address, message))
+        for dest in (d for d in destinations if d in self.nodes):
+            sendto(dest, copy.deepcopy(message))
 
 
